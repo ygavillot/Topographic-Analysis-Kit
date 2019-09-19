@@ -29,9 +29,13 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	% 		threshold_area [1e6] - minimum accumulation area to define streams in meters squared
 	% 		segment_length [1000] - smoothing distance in meters for averaging along ksn, suggested value is 1000 meters
 	% 		ref_concavity [0.5] - reference concavity for calculating ksn, suggested value is 0.45
-	%		ksn_method [quick] - switch between method to calculate ksn values, options are 'quick' and 'trib', the 'trib' method takes 3-4 times longer 
+	%		ksn_method [quick] - switch between method to calculate ksn values, options are 'quick', 'trunk', or 'trib', the 'trib' method takes 3-4 times longer 
 	%			than the 'quick' method. In most cases, the 'quick' method works well, but if values near tributary junctions are important, then 'trib'
-	%			may be better as this calculates ksn values for individual channel segments individually
+	%			may be better as this calculates ksn values for individual channel segments individually. The 'trunk' option calculates steepness values
+	%			of large streams independently (streams considered as trunks are controlled by the stream order value supplied to 'min_order'). The 'trunk' option
+	%			may be of use if you notice anomaoloulsy high channel steepness values on main trunk streams that can result because of the way values are reach
+	%			averaged.
+	%		min_order [4] - minimum stream order for a stream to be considered a trunk stream, only used if 'ksn_method' is set to 'trunk'
 	% 		write_arc_files [false] - set value to true to output a ascii's of various grids and a shapefile of the ksn, false to not output arc files
 	%		add_grids [] - option to provide a cell array of additional grids to clip by selected river basins. The expected input is a nx2 cell array,
 	%			where the first column is a GRIDobj and the second column is a string identifying what this grid is (so you can remember what these grids
@@ -56,6 +60,8 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	%		relief_radii [2500] - a 1d vector (column or row) of radii to use for calculating local relief, values must be in map units. If more than one value is provided
 	%			the function assumes you wish to calculate relief at all of these radii. Note, the local relief function is slow so providing multiple radii will
 	%			slow code performance. Saved outputs will be in a m x 2 cell array, with the columns of the cell array corresponding to the GRIDobj and the input radii.
+	%		ksn_radius [5000] - radius of circular, moving area over which to average ksn values for making an interpolated ksn grid. If you provide an empty array, 
+	%			i.e. [], to this argument this will suppress the calculation (and saving of this output)
 	%
 	% Notes:
 	%		-The code will perform a check of the river_mouths input to confirm that 1) there are no duplicate ID numbers (it will dump your ID numbers and create new
@@ -85,7 +91,8 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	addParameter(p,'threshold_area',1e6,@(x) isscalar(x) && isnumeric(x));
 	addParameter(p,'segment_length',1000,@(x) isscalar(x) && isnumeric(x));
 	addParameter(p,'write_arc_files',false,@(x) isscalar(x));
-	addParameter(p,'ksn_method','quick',@(x) ischar(validatestring(x,{'quick','trib'})));
+	addParameter(p,'ksn_method','quick',@(x) ischar(validatestring(x,{'quick','trunk','trib'})));
+	addParameter(p,'min_order',4,@(x) isscalar(x) && isnumeric(x));
 	addParameter(p,'add_grids',[],@(x) isa(x,'cell') && size(x,2)==2);
 	addParameter(p,'add_cat_grids',[],@(x) isa(x,'cell') && size(x,2)==3);
 	addParameter(p,'resample_method','nearest',@(x) ischar(validatestring(x,{'nearest','bilinear','bicubic'})));
@@ -94,6 +101,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	addParameter(p,'relief_radii',[2500],@(x) isnumeric(x) && size(x,2)==1 || size(x,1)==1);
 	addParameter(p,'conditioned_DEM',[],@(x) isa(x,'GRIDobj'));
 	addParameter(p,'interp_value',0.1,@(x) isnumeric(x) && x>=0 && x<=1);
+	addParameter(p,'ksn_radius',5000,@(x) isnumeric(x) && isscalar(x) || isempty(x));
 
 	parse(p,DEM,FD,A,S,river_mouths,basin_dir,varargin{:});
 	DEM=p.Results.DEM;
@@ -103,6 +111,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	river_mouths=p.Results.river_mouths;
 	basin_dir=p.Results.basin_dir;
 
+	min_order=p.Results.min_order;
 	theta_ref=p.Results.ref_concavity;
 	threshold_area=p.Results.threshold_area;
 	segment_length=p.Results.segment_length;
@@ -116,6 +125,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	relief_radii=p.Results.relief_radii;
 	iv=p.Results.interp_value;
 	DEMhc=p.Results.conditioned_DEM;
+	radius=p.Results.ksn_radius;
 
 
 	% Set redo_flag
@@ -142,9 +152,15 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 		end
 	end
 
+	% Peform check on segment length
+	if (DEM.cellsize*3)>segment_length
+		segment_length=DEM.cellsize*3;
+		warning(['Provided segment_length is incompatible with DEM resolution, segment_length reset to ' num2str(segment_length)])
+	end
+
 	if ischar(river_mouths)
 		disp('Reading shapefile and snapping river mouths to stream network')
-		rm_ms=shaperead(river_mouths);
+		rm_ms=shaperead(fullfile(current,river_mouths));
 		rm_t=struct2table(rm_ms);
 		if ~strcmp(rm_t.Geometry(1),'Point')
 			error('Shapefile provided as "river_mouths" does not appear to be a point shapefile');
@@ -309,6 +325,9 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 		case 'quick'
 			[MSc]=KSN_Quick(DEMoc,DEMcc,Ac,Sc,Chic.mn,segment_length);
 			[MSNc]=KSN_Quick(DEMoc,DEMcc,Ac,Sc,theta_ref,segment_length);
+		case 'trunk'
+			[MSc]=KSN_Trunk(DEMoc,DEMcc,Ac,Sc,Chic.mn,segment_length,min_order);
+			[MSNc]=KSN_Trunk(DEMoc,DEMcc,Ac,Sc,theta_ref,segment_length,min_order);			
 		case 'trib'
 			% Overide choice if very small basin as KSN_Trib will fail for small basins
 			if drainage_area>2.5
@@ -352,13 +371,22 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 		% Save base file
 		FileName=['Basin_' num2str(basin_num) '_Data.mat'];
 		save(FileName,'RiverMouth','DEMcc','DEMoc','out_el','drainage_area','hyps','FDc','Ac','Sc','SLc','Chic','Goc','MSc','MSNc','KSNc_stats','Gc_stats','Zc_stats','Centroid','ChiOBJc','ksn_method','gradient_method','theta_ref','-v7.3');
-		
-		% Make interpolated ksn grid
-		try 
-			[KsnOBJc] = KsnInt(DEMoc,MSNc);
-			save(FileName,'KsnOBJc','-append','-v7.3');
-		catch
-			warning(['Interpolation of KSN grid failed for basin ' num2str(RiverMouth(:,3))]);
+	
+		if strcmp(ksn_method,'trunk')
+			save(FileName,'min_order','-append');
+		end
+
+		%Make interpolated ksn grid
+		if ~isempty(radius)
+			try 
+				[KsnOBJc] = KsnAvg(DEMoc,MSNc,radius);
+				save(FileName,'KsnOBJc','radius','-append');
+			catch
+				warning(['Interpolation of KSN grid failed for basin ' num2str(RiverMouth(:,3))]);
+				save(FileName,'radius','-append');
+			end
+		else 
+			save(FileName,'radius','-append')
 		end
 
 		% If additional grids are present, append them to the mat file
@@ -376,7 +404,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 				se_AGc=std_AGc/sqrt(sum(~isnan(AGcOI.Z(:))));
 				AGc_stats(jj,:)=[mean_AGc se_AGc std_AGc min_AGc max_AGc];
 			end
-			save(FileName,'AGc','AGc_stats','-append','-v7.3');				
+			save(FileName,'AGc','AGc_stats','-append');				
 		end
 
 		if ~isempty(ACG)
@@ -395,7 +423,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 				ACGc{jj,2}=T;
 				ACGc_stats(jj,1)=[mode(ACGcOI.Z(:))];
 			end
-			save(FileName,'ACGc','ACGc_stats','-append','-v7.3');	
+			save(FileName,'ACGc','ACGc_stats','-append');	
 		end				
 
 		if calc_relief
@@ -416,7 +444,7 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 				se_rlf=std_rlf/sqrt(sum(~isnan(rlfOI.Z(:))));
 				rlf_stats(jj,:)=[mean_rlf se_rlf std_rlf min_rlf max_rlf radOI];
 			end
-			save(FileName,'rlf','rlf_stats','-append','-v7.3');
+			save(FileName,'rlf','rlf_stats','-append');
 		end
 
 		if write_arc_files
@@ -463,15 +491,61 @@ function ProcessRiverBasins(DEM,FD,A,S,river_mouths,basin_dir,varargin)
 	cd(current);
 end
 
-
 function [ksn_ms]=KSN_Quick(DEM,DEMc,A,S,theta_ref,segment_length)
-	G=gradient8(DEMc);
+	g=gradient(S,DEMc);
+	G=GRIDobj(DEM);
+	G.Z(S.IXgrid)=g;
+
 	Z_RES=DEMc-DEM;
 
 	ksn=G./(A.*(A.cellsize^2)).^(-theta_ref);
+
+	SD=GRIDobj(DEM);
+	SD.Z(S.IXgrid)=S.distance;
 	
 	ksn_ms=STREAMobj2mapstruct(S,'seglength',segment_length,'attributes',...
-		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean});
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SD @min 'max_dist' SD @max});
+
+	seg_dist=[ksn_ms.max_dist]-[ksn_ms.min_dist];
+	distcell=num2cell(seg_dist');
+	[ksn_ms(1:end).seg_dist]=distcell{:};
+	ksn_ms=rmfield(ksn_ms,{'min_dist','max_dist'});
+end
+
+function [ksn_ms]=KSN_Trunk(DEM,DEMc,A,S,theta_ref,segment_length,min_order)
+
+	order_exp=['>=' num2str(min_order)];
+
+    Smax=modify(S,'streamorder',order_exp);
+	Smin=modify(S,'rmnodes',Smax);
+
+	g=gradient(S,DEMc);
+	G=GRIDobj(DEM);
+	G.Z(S.IXgrid)=g;
+
+	Z_RES=DEMc-DEM;
+
+	ksn=G./(A.*(A.cellsize^2)).^(-theta_ref);
+
+	SDmax=GRIDobj(DEM);
+	SDmin=GRIDobj(DEM);
+	SDmax.Z(Smax.IXgrid)=Smax.distance;
+	SDmin.Z(Smin.IXgrid)=Smin.distance;
+
+	ksn_ms_min=STREAMobj2mapstruct(Smin,'seglength',segment_length,'attributes',...
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SDmin @min 'max_dist' SDmin @max});
+
+	ksn_ms_max=STREAMobj2mapstruct(Smax,'seglength',segment_length,'attributes',...
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SDmax @min 'max_dist' SDmax @max});
+
+	ksn_ms=vertcat(ksn_ms_min,ksn_ms_max);
+	seg_dist=[ksn_ms.max_dist]-[ksn_ms.min_dist];
+	distcell=num2cell(seg_dist');
+	[ksn_ms(1:end).seg_dist]=distcell{:};
+	ksn_ms=rmfield(ksn_ms,{'min_dist','max_dist'});
 end
 
 function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
@@ -483,8 +557,7 @@ function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
 	z=getnal(S,DEMc);
 	zu=getnal(S,DEM);
 	z_res=z-zu;
-	G=gradient8(DEMc);
-	g=getnal(S,G);
+	g=gradient(S,DEMc);
 	c=chitransform(S,A,'a0',1,'mn',theta_ref);
 	d=S.distance;
 	da=getnal(S,A.*(A.cellsize^2));
@@ -543,6 +616,7 @@ function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
 						ksn_ms(seg_count).uparea=mean(da(bin_ix));
 						ksn_ms(seg_count).gradient=mean(g(bin_ix));
 						ksn_ms(seg_count).cut_fill=mean(z_res(bin_ix));
+						ksn_ms(seg_count).seg_dist=max(S.distance(bin_ix))-min(S.distance(bin_ix));
 						ksn_ms(seg_count).chi_r2=r2;
 						
 						seg_count=seg_count+1;
@@ -614,25 +688,32 @@ function [KSN,R2] = Chi_Z_Spline(c,z)
 
 end
 
-function [KSNGrid] = KsnInt(DEM,ksn_ms)
-    [xx,yy]=getcoordinates(DEM);
-    [X,Y]=meshgrid(xx,yy);
+function [KSNGrid] = KsnAvg(DEM,ksn_ms,radius)
 
-    ksn_cell=cell(numel(ksn_ms),1);
-    for ii=1:numel(ksn_ms)
-        ksn_cell{ii}=ones(numel(ksn_ms(ii).X),1)*ksn_ms(ii).ksn;
-    end
-    ksn_x=vertcat(ksn_ms.X); ksn_y=vertcat(ksn_ms.Y); ksn_ksn=vertcat(ksn_cell{:});
-    idx=isnan(ksn_ksn);
-    ksn_x(idx)=[];
-    ksn_y(idx)=[];
-    ksn_ksn(idx)=[];
-    
-    warning off
-    Fk=scatteredInterpolant(ksn_x,ksn_y,ksn_ksn,'natural');
-    warning on
-    ksn_int=Fk(X,Y);
-    KSNGrid=GRIDobj(xx,yy,ksn_int);
-    IDX=isnan(DEM);
-    KSNGrid.Z(IDX.Z)=NaN;
+	% Calculate radius
+	radiuspx = ceil(radius/DEM.cellsize);
+
+	% Record mask of current NaNs
+	MASK=isnan(DEM.Z);
+
+	% Make grid with values along channels
+	KSNGrid=GRIDobj(DEM);
+	KSNGrid.Z(:,:)=NaN;
+	for ii=1:numel(ksn_ms)
+		ix=coord2ind(DEM,ksn_ms(ii).X,ksn_ms(ii).Y);
+		KSNGrid.Z(ix)=ksn_ms(ii).ksn;
+	end
+
+	% Local mean based on radius
+	ISNAN=isnan(KSNGrid.Z);
+    [~,L] = bwdist(~ISNAN,'e');
+    ksng = KSNGrid.Z(L);           
+    FLT   = fspecial('disk',radiuspx);
+    ksng   = imfilter(ksng,FLT,'symmetric','same','conv');
+
+    % Set original NaN cells back to NaN
+    ksng(MASK)=NaN;
+
+    % Output
+    KSNGrid.Z=ksng;
 end

@@ -280,9 +280,9 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 	out_mat_name=[shape_name '_profiler.mat'];
 	out_restart_name=[shape_name '_restart.mat'];
 	if rf
-		save(out_mat_name,'input_params','-append','-v7.3');
+		save(out_mat_name,'input_params','-append');
 		if exist(out_restart_name)==2
-			save(out_restart_name,'input_params','-append','-v7.3');
+			save(out_restart_name,'input_params','-append');
 		else
 			save(out_restart_name,'input_params','-v7.3');
 		end
@@ -575,7 +575,7 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 
 						delete(p1);
 
-						[Sn]=RedefineThreshold(DEM,FD,A,Sn,FLUS,ref_theta,rd_pick_method,smooth_distance,ii,save_figures);
+						[Sn]=RedefineThreshold(DEM,FD,A,Sn,FLUS,ref_theta,rd_pick_method,smooth_distance,ii,save_figures,shape_name);
 						% Update DEMc
 						if any(isnan(getnal(Sn,DEMc)));
 							zc=mincosthydrocon(Sn,DEM,'interp',iv);
@@ -862,22 +862,47 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_chidist=sqrt(sum(bsxfun(@minus, rc, lb).^2,2));
 							rb_chidist=sqrt(sum(bsxfun(@minus, rc, rb).^2,2));
 
-							lbx=rx(lb_chidist==min(lb_chidist));
-							lby=ry(lb_chidist==min(lb_chidist));
+							[~,lbix]=min(lb_chidist);
+							[~,rbix]=min(rb_chidist);
 
-							rbx=rx(rb_chidist==min(rb_chidist));
-							rby=ry(rb_chidist==min(rb_chidist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
+
+							rbx=rx(rbix);
+							rby=ry(rbix);
 
 							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
-
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;	
 
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
+
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end
 
 							% Construct bound list
 							if jj<num_bnds-1
@@ -1175,27 +1200,52 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_dist=sqrt(sum(bsxfun(@minus, rd, lb).^2,2));
 							rb_dist=sqrt(sum(bsxfun(@minus, rd, rb).^2,2));
 
-							lbx=rx(lb_dist==min(lb_dist));
-							lby=ry(lb_dist==min(lb_dist));
+							[~,lbix]=min(lb_dist);
+							[~,rbix]=min(rb_dist);
 
-							rbx=rx(rb_dist==min(rb_dist));
-							rby=ry(rb_dist==min(rb_dist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
 
-							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
+							rbx=rx(rbix);
+							rby=ry(rbix);	
 
+							lix=coord2ind(DEM,lbx,lby);	
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;
+
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
+
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end
 
 							% Construct bound list
 							if jj<num_bnds-1
 								bnd_ix(jj,1)=rix;
 							end	
-
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
 
 							% Calculate chi to find ksn and bestfit concavity 
 							if strcmp(theta_method,'ref')
@@ -1439,22 +1489,47 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_dadist=sqrt(sum(bsxfun(@minus, ra, lb).^2,2));
 							rb_dadist=sqrt(sum(bsxfun(@minus, ra, rb).^2,2));
 
-							lbx=rx(lb_dadist==min(lb_dadist));
-							lby=ry(lb_dadist==min(lb_dadist));
+							[~,lbix]=min(lb_dadist);
+							[~,rbix]=min(rb_dadist);
 
-							rbx=rx(rb_dadist==min(rb_dadist));
-							rby=ry(rb_dadist==min(rb_dadist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
+
+							rbx=rx(rbix);
+							rby=ry(rbix);	
 
 							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
-
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;	
 
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
+
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end							
 
 							% Construct bound list
 							if jj<num_bnds-1
@@ -1592,10 +1667,10 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 					bnd_master{ii,1}=bnd_ix;
 					res_master{ii,1}=res_list;
 					count=ii;
-					save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append','-v7.3');
+					save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append');
 					if save_figures
-						f2_name=['StreamFits_' num2str(ii) '.pdf'];
-						f3_name=['StreamRsds_' num2str(ii) '.pdf'];
+						f2_name=[shape_name '_stream_fits_' num2str(ii) '.pdf'];
+						f3_name=[shape_name '_stream_rsds_' num2str(ii) '.pdf'];
 						print(f2,f2_name,'-dpdf','-fillpage');
 						print(f3,f3_name,'-dpdf','-fillpage');
 					end
@@ -1616,10 +1691,10 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 					bnd_master{ii,1}=bnd_ix;
 					res_master{ii,1}=res_list;
 					count=ii;
-					save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append','-v7.3');					
+					save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append');					
 					if save_figures
-						f2_name=['StreamFits_' num2str(ii) '.pdf'];
-						f3_name=['StreamRsds_' num2str(ii) '.pdf'];
+						f2_name=[shape_name '_stream_fits_' num2str(ii) '.pdf'];
+						f3_name=[shape_name '_stream_rsds_' num2str(ii) '.pdf'];
 						print(f2,f2_name,'-dpdf','-fillpage');
 						print(f3,f3_name,'-dpdf','-fillpage');
 					end
@@ -1689,7 +1764,7 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 				Sn=modify(S,'downstreamto',IX);
 
 				if redefine_thresh
-					[Sn]=RedefineThreshold(DEM,FD,A,Sn,FLUS,ref_theta,rd_pick_method,smooth_distance,ii,save_figures);
+					[Sn]=RedefineThreshold(DEM,FD,A,Sn,FLUS,ref_theta,rd_pick_method,smooth_distance,ii,save_figures,shape_name);
 					% Update DEMc
 					if any(isnan(getnal(Sn,DEMc)));
 						zc=mincosthydrocon(Sn,DEM,'interp',iv);
@@ -1912,22 +1987,47 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_chidist=sqrt(sum(bsxfun(@minus, rc, lb).^2,2));
 							rb_chidist=sqrt(sum(bsxfun(@minus, rc, rb).^2,2));
 
-							lbx=rx(lb_chidist==min(lb_chidist));
-							lby=ry(lb_chidist==min(lb_chidist));
+							[~,lbix]=min(lb_chidist);
+							[~,rbix]=min(rb_chidist);
 
-							rbx=rx(rb_chidist==min(rb_chidist));
-							rby=ry(rb_chidist==min(rb_chidist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
+
+							rbx=rx(rbix);
+							rby=ry(rbix);
 
 							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
-
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;	
 
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
+
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end
 
 							% Construct bound list
 							if jj<num_bnds-1
@@ -2199,27 +2299,47 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_dist=sqrt(sum(bsxfun(@minus, rd, lb).^2,2));
 							rb_dist=sqrt(sum(bsxfun(@minus, rd, rb).^2,2));
 
-							lbx=rx(lb_dist==min(lb_dist));
-							lby=ry(lb_dist==min(lb_dist));
+							[~,lbix]=min(lb_dist);
+							[~,rbix]=min(rb_dist);
 
-							rbx=rx(rb_dist==min(rb_dist));
-							rby=ry(rb_dist==min(rb_dist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
 
-							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
+							rbx=rx(rbix);
+							rby=ry(rbix);	
 
+							lix=coord2ind(DEM,lbx,lby);	
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;
 
-							% Construct bound list
-							if jj<num_bnds-1
-								bnd_ix(jj,1)=rix;
-							end	
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
 
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end
 
 							% Calculate chi to find ksn and bestfit concavity 
 							if strcmp(theta_method,'ref')
@@ -2436,22 +2556,47 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 							lb_dadist=sqrt(sum(bsxfun(@minus, ra, lb).^2,2));
 							rb_dadist=sqrt(sum(bsxfun(@minus, ra, rb).^2,2));
 
-							lbx=rx(lb_dadist==min(lb_dadist));
-							lby=ry(lb_dadist==min(lb_dadist));
+							[~,lbix]=min(lb_dadist);
+							[~,rbix]=min(rb_dadist);
 
-							rbx=rx(rb_dadist==min(rb_dadist));
-							rby=ry(rb_dadist==min(rb_dadist));	
+							lbx=rx(lbix);
+							lby=ry(lbix);
+
+							rbx=rx(rbix);
+							rby=ry(rbix);	
 
 							lix=coord2ind(DEM,lbx,lby);
-							LIX=GRIDobj(DEM,'logical');
-							LIX.Z(lix)=true;	
-
 							rix=coord2ind(DEM,rbx,rby);
-							RIX=GRIDobj(DEM,'logical');
-							RIX.Z(rix)=true;	
 
-							Seg=modify(Sn,'downstreamto',RIX);
-							Seg=modify(Seg,'upstreamto',LIX);
+							Seg=modify(Sn,'downstreamto',rix);
+							Seg=modify(Seg,'upstreamto',lix);
+
+							%Remake stream with downstream bound node added back in
+							WSEG=GRIDobj(DEM,'logical');
+							WSEG.Z(Seg.IXgrid)=true;
+							WSEG.Z(lix)=true;
+							% Add back in upstream node if it's the end of the stream
+							if jj==num_bnds-1
+								WSEG.Z(rix)=true;
+							end
+							Seg=STREAMobj(FD,WSEG);
+
+							% Check length of stream, if it's less than two nodes,
+							% move down stream until it's greater than two nodes
+							lbix_new=lbix+1;
+							first_time=true;
+							while numel(Seg.IXgrid)<=2
+								if first_time
+									wrn_mssg=['Segment ' num2str(jj) ' of chosen segments was too short, segment bound was expanded downstream'];
+									wd=warndlg(wrn_mssg);
+									uiwait(wd);
+								end
+								lix_new=coord2ind(DEM,rx(lbix_new),ry(lbix_new));
+								WSEG.Z(lix_new)=true;
+								Seg=STREAMobj(FD,WSEG);
+								lbix_new=lbix_new+1;
+								first_time=false;
+							end
 
 							% Construct bound list
 							if jj<num_bnds-1
@@ -2559,7 +2704,9 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 				end
 
 				if ii<num_ch
-					qa2=questdlg('What would you like to do?','Stream Fitting','Ignore Remaining Streams','Redo Fit','Continue Picking','Continue Picking');
+
+					ignore_str=['Ignore ' num2str(num_ch-ii) ' Remaining Streams'];
+					qa2=questdlg('What would you like to do?','Stream Fitting',ignore_str,'Redo Fit','Continue Picking','Continue Picking');
 
 					switch qa2
 					case 'Continue Picking'
@@ -2576,10 +2723,10 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 						res_master{ii,1}=res_list;		
 						Sc=Sct;
 						count=ii;
-						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append','-v7.3');						
+						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append');						
 						if save_figures
-							f2_name=['StreamFits_' num2str(ii) '.pdf'];
-							f3_name=['StreamRsds_' num2str(ii) '.pdf'];
+							f2_name=[shape_name '_stream_fits_' num2str(ii) '.pdf'];
+							f3_name=[shape_name '_stream_rsds_' num2str(ii) '.pdf'];
 							print(f2,f2_name,'-dpdf','-fillpage');
 							print(f3,f3_name,'-dpdf','-fillpage');
 						end
@@ -2588,7 +2735,7 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 						str2 = 'R';
 						str1 = 'R';
 						clear ksn_list ksn_nodes res_list bnd_ix;
-					case 'Ignore Remaining Streams'
+					case ignore_str
 						wtb=waitbar(0,'Cleaning up and generating outputs, do not close windows');
 						str1=[];
 						str2=[];
@@ -2603,10 +2750,10 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 						res_master{ii,1}=res_list;		
 						Sc=Sct;
 						count=ii;
-						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append','-v7.3');
+						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append');
 						if save_figures
-							f2_name=['StreamFits_' num2str(ii) '.pdf'];
-							f3_name=['StreamRsds_' num2str(ii) '.pdf'];
+							f2_name=[shape_name '_stream_fits_' num2str(ii) '.pdf'];
+							f3_name=[shape_name '_stream_rsds_' num2str(ii) '.pdf'];
 							print(f2,f2_name,'-dpdf','-fillpage');
 							print(f3,f3_name,'-dpdf','-fillpage');
 						end
@@ -2635,10 +2782,10 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 						res_master{ii,1}=res_list;		
 						Sc=Sct;
 						count=ii;
-						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append','-v7.3');
+						save(out_restart_name,'ksn_master','bnd_master','res_master','Sc','count','-append');
 						if save_figures
-							f2_name=['StreamFits_' num2str(ii) '.pdf'];
-							f3_name=['StreamRsds_' num2str(ii) '.pdf'];
+							f2_name=[shape_name '_stream_fits_' num2str(ii) '.pdf'];
+							f3_name=[shape_name '_stream_rsds_' num2str(ii) '.pdf'];
 							print(f2,f2_name,'-dpdf','-fillpage');
 							print(f3,f3_name,'-dpdf','-fillpage');
 						end
@@ -2851,7 +2998,7 @@ function [knl,ksn_master,bnd_list,Sc]=KsnProfiler(DEM,FD,A,S,varargin)
 	waitbar(4/5,wtb);
 
 	% Save out file
-	save(out_mat_name,'knl','ksn_master','bnd_list','Sc','bnd_master','res_master','count','-append','-v7.3');
+	save(out_mat_name,'knl','ksn_master','bnd_list','Sc','bnd_master','res_master','count','-append');
 	% Delete restart file after successful completion
 	delete(out_restart_name);
 
@@ -2881,7 +3028,11 @@ function [OUT]=ChiCalc(S,DEM,A,a0,varargin)
 	% elevation values at nodes
 	zx   = double(DEM.Z(S.IXgrid));
 	% elevation at outlet
-	zb   = double(DEM.Z(S.IXgrid(outlet)));
+	if nnz(outlet)==0
+		zb=min(zx);
+	else
+		zb   = double(DEM.Z(S.IXgrid(outlet)));
+	end
 	% a is the term inside the brackets of equation 6b 
 	a    = double(a0./(A.Z(S.IXgrid)*(A.cellsize.^2)));
 	% x is the cumulative horizontal distance in upstream direction
@@ -2992,15 +3143,14 @@ function [Xavg,Yavg]=BinAverage(X,Y,bin_size);
 end
 
 function [ksn]=KSN_Quick(DEM,A,S,theta_ref)
-
 	zc=mincosthydrocon(S,DEM,'interp',0.1);
-	DEMc=GRIDobj(DEM);
-	DEMc.Z(DEMc.Z==0)=NaN;
-	DEMc.Z(S.IXgrid)=zc;
-	G=gradient8(DEMc);
+
+	g=gradient(S,zc);
+	G=GRIDobj(DEM);
+	G.Z(G.Z==0)=NaN;
+	G.Z(S.IXgrid)=g;
 
 	ksn=G./(A.*(A.cellsize^2)).^(-theta_ref);
-	
 end
 
 function [bs,ba,bc,bd,a,g,d,C]=sa(DEM,S,A,C,bin_size)
@@ -3117,7 +3267,7 @@ function [bs,ba,bc,bd,bk,a,g,d,C]=sa_ksn(DEM,S,A,C,ak,bin_size);
 	k=k(idx);
 end
 
-function [Sn]=RedefineThreshold(DEM,FD,A,S,FLUS,ref_theta,pick_method,bin_size,count,figure_flag)
+function [Sn]=RedefineThreshold(DEM,FD,A,S,FLUS,ref_theta,pick_method,bin_size,count,figure_flag,shape_name)
 
 	% Find channel head and flow distances
 	chix=streampoi(S,'channelheads','ix');
@@ -3269,7 +3419,7 @@ function [Sn]=RedefineThreshold(DEM,FD,A,S,FLUS,ref_theta,pick_method,bin_size,c
 	end
 
 	if figure_flag
-		f4_name=['StreamThresh_' num2str(count) '.pdf'];
+		f4_name=[shape_name '_stream_thresh_' num2str(count) '.pdf'];
 		print(f4,f4_name,'-dpdf','-fillpage');
 	end
 

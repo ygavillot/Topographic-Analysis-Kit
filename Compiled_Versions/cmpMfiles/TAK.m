@@ -134,6 +134,8 @@ function TAK(func_name,wdir,varargin)
 		if nf_args==num_req
 			if strcmp(req_args{2},'all')
 				cmpFindThreshold(wdir,req_args{1},req_args{2});
+			elseif strcmp(req_args{2},'auto')
+				cmpFindThreshold(wdir,req_args{1},req_args{2});
 			else
 				cmpFindThreshold(wdir,req_args{1},str2num(req_args{2}));
 			end
@@ -148,10 +150,22 @@ function TAK(func_name,wdir,varargin)
 				switch pn
 				case 'ref_concavity'
 					opt_args{evens(ii)}=str2num(pv);
+				case 'max_threshold'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'remake_network'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
 				end
 			end
 
 			if strcmp(req_args{2},'all')
+				cmpFindThreshold(wdir,req_args{1},req_args{2},opt_args);
+			elseif strcmp(req_args{2},'auto')
 				cmpFindThreshold(wdir,req_args{1},req_args{2},opt_args);
 			else
 				cmpFindThreshold(wdir,req_args{1},str2num(req_args{2}),opt_args);
@@ -281,6 +295,45 @@ function TAK(func_name,wdir,varargin)
 			cmpSegmentProjector(wdir,req_args{1},opt_args);
 		end
 		disp('Function Successfully Completed')
+	case 'ProjectedIncision'
+		num_req=3;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpProjectedIncision(wdir,req_args{1},req_args{2},req_args{3});
+		else
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'exclude_streams'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'interp_value'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'display_figure'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'save_figure'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpProjectedIncision(wdir,req_args{1},req_args{2},req_args{3},opt_args);
+		end
+		disp('Function Successfully Completed')		
 	case 'BasinPicker'
 		num_req=1;
 		req_args=varargin(1:num_req);
@@ -324,11 +377,17 @@ function TAK(func_name,wdir,varargin)
 				switch pn
 				case 'segment_length'
 					opt_args{evens(ii)}=str2num(pv);
+				case 'smooth_distance'
+					opt_args{evens(ii)}=str2num(pv);
 				case 'ref_concavity'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'min_order'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'min_elevation'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'interp_value'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'radius'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'complete_networks_only'
 					if strcmpi(pv,'false')
@@ -341,6 +400,57 @@ function TAK(func_name,wdir,varargin)
 				end
 			end
 			cmpKsnChiBatch(wdir,req_args{1},req_args{2},opt_args);
+		end
+		disp('Function Successfully Completed')
+	case 'AutoKsnProfiler'
+		num_req=2;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpAutoKsnProfiler(wdir,req_args{1},str2num(req_args{2}));
+		else
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'ref_concavity'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'segment_length'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'channeloi'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'interp_value'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'calc_concavity'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'plot_example'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'explore_param'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpAutoKsnProfiler(wdir,req_args{1},str2num(req_args{2}),opt_args);
 		end
 		disp('Function Successfully Completed')
 	case 'KsnProfiler'
@@ -423,6 +533,136 @@ function TAK(func_name,wdir,varargin)
 			cmpClassifyKnicks(wdir,req_args{1},req_args{2},opt_args);
 		end
 		disp('Function Successfully Completed')
+	case 'EroGrid'
+		num_req=4;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpEroGrid(wdir,req_args{1},req_args{2},str2num(req_args{3}),str2num(req_args{4}));
+		else
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'radius'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'C_std'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'phi_std'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'edges'
+					opt_args{evens(ii)}=str2num(pv);										
+				case 'use_ksnstd'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpEroGrid(wdir,req_args{1},req_args{2},str2num(req_args{3}),str2num(req_args{4}),opt_args);
+		end
+		disp('Function Successfully Completed')
+	case 'JunctionAngle'
+		num_req=2;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpJunctionAngle(wdir,req_args{1},str2num(req_args{2}));
+		else		
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'ref_concavity'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'use_n_nodes'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end					
+				case 'verbose'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpJunctionAngle(wdir,req_args{1},str2num(req_args{2}),opt_args);
+		end
+		disp('Function Successfully Completed')			
+	case 'InspectJunctions'
+		num_req=3;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpInspectJunctions(wdir,req_args{1},req_args{2},str2num(req_args{3}));
+		else		
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'fit_distance'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'num_nodes'
+					opt_args{evens(ii)}=str2num(pv);	
+				case 'save_fig'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end					
+				end
+			end
+			cmpInspectJunctions(wdir,req_args{1},req_args{2},str2num(req_args{3}),opt_args);
+		end
+		disp('Function Successfully Completed')	
+	case 'JunctionLinks'
+		num_req=2;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpJunctionLinks(wdir,req_args{1},req_args{2});
+		else		
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn	
+				case 'make_shape'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end					
+				end
+			end
+			cmpJunctionLinks(wdir,req_args{1},req_args{2},opt_args);
+		end
+		disp('Function Successfully Completed')		
 	case 'ProcessRiverBasins'
 		num_req=3;
 		req_args=varargin(1:num_req);
@@ -452,6 +692,10 @@ function TAK(func_name,wdir,varargin)
 				case 'interp_value'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'threshold_area'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'min_order'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'ksn_radius'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'write_arc_files'
 					if strcmpi(pv,'false')
@@ -710,6 +954,8 @@ function TAK(func_name,wdir,varargin)
 				pn=opt_args{odds(ii)};
 				pv=opt_args{evens(ii)};
 				switch pn
+				case 'new_concavity'
+					opt_args{evens(ii)}=str2num(pv);	
 				case 'populate_categories'
 					if strcmpi(pv,'false')
 						opt_args{evens(ii)}=false;
@@ -738,6 +984,8 @@ function TAK(func_name,wdir,varargin)
 				pv=opt_args{evens(ii)};
 				switch pn
 				case 'dist_along_azimuth'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'new_concavity'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'filter_by_category'
 					if strcmpi(pv,'false')
@@ -824,6 +1072,8 @@ function TAK(func_name,wdir,varargin)
 				pn=opt_args{odds(ii)};
 				pv=opt_args{evens(ii)};
 				switch pn
+				case 'small_circ_center'
+					opt_args{evens(ii)}=str2num(pv);
 				case 'sample'
 					opt_args{evens(ii)}=str2num(pv);
 				case 'smooth'
@@ -852,6 +1102,53 @@ function TAK(func_name,wdir,varargin)
 				req_args{5},str2num(req_args{6}),opt_args);
 		end
 		disp('Function Successfully Completed')
+	case 'MakeSerialSwath'
+		num_req=4;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpMakeSerialSwath(wdir,req_args{1},req_args{2},str2num(req_args{3}),str2num(req_args{4}));
+		else
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'sample'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'smooth'
+					opt_args{evens(ii)}=str2num(pv);
+				case 'plot_map'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'plot_individual'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end					
+				case 'save_figures'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpMakeSerialSwath(wdir,req_args{1},req_args{2},str2num(req_args{3}),str2num(req_args{4}),opt_args);
+		end
+		disp('Function Successfully Completed')		
 	case 'DippingBedFinder'
 		num_req=6;
 		req_args=varargin(1:num_req);
@@ -865,6 +1162,9 @@ function TAK(func_name,wdir,varargin)
 		req_args=varargin(1:num_req);
 		if nf_args==num_req
 			cmpMat2Arc(wdir,req_args{1},req_args{2});
+		else
+			opt_args=varargin(num_req+1:end);
+			cmpMat2Arc(wdir,req_args{1},req_args{2},opt_args);
 		end
 		disp('Function Successfully Completed')
 	case 'PlotKsn'
@@ -873,16 +1173,68 @@ function TAK(func_name,wdir,varargin)
 		if nf_args==num_req
 			cmpPlotKsn(wdir,req_args{1},req_args{2});
 		else
-			opt_args=varargin(num_req+1:end);
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'ksn_lim'
+					opt_args{evens(ii)}=str2num(pv);
+				end
+			end
 			cmpPlotKsn(wdir,req_args{1},req_args{2},opt_args);
 		end
 		disp('Function Successfully Completed')
+	case 'HackRelationship'
+		num_req=1;
+		req_args=varargin(1:num_req);
+		if nf_args==num_req
+			cmpHackRelationship(wdir,req_args{1});
+		else
+			opt_args=varargin(num_req+1:end);
+			num_var=numel(opt_args);
+			odds=1:2:num_var;
+			evens=2:2:num_var;
+			for ii=1:num_var/2
+				pn=opt_args{odds(ii)};
+				pv=opt_args{evens(ii)};
+				switch pn
+				case 'include_hillslope'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'draw_fig'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				case 'save_fig'
+					if strcmpi(pv,'false')
+						opt_args{evens(ii)}=false;
+					elseif strcmpi(pv,'true')
+						opt_args{evens(ii)}=true;
+					else
+						opt_args{evens(ii)}=logical(str2num(pv));
+					end
+				end
+			end
+			cmpHackRelationship(wdir,req_args{1},opt_args);
+        end
+        disp('Function Successfully Completed')
 	case 'CatPoly2GRIDobj'
-		disp('There is no compiled version of the CatPoly2GRIDobj function')
+		disp('There is no compiled version of the CatPoly2GRIDobj function, use the compiled PrepareAddCatGrids function')
 	case 'ksncolor'
-		disp('There is no compiled version of the KsnColor function')
+		disp('There is no compiled version of the ksncolor function')
 	case 'ProjectOntoSwath'
 		disp('There is no compiled version of the ProjectOntoSwath function, use the compiled MakeCombinedSwath function')
+	case 'ProjectGPSOntoSwath'
+		disp('There is no compiled version of the ProjectGPSOntoSwath function, use the compiled MakeCombinedSwath function')		
 	otherwise
 		disp([func_name ' is not a recognized function name within TAK'])
 	%Main switch end	

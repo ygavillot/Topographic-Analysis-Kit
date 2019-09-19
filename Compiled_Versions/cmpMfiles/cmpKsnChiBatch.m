@@ -6,11 +6,12 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 	%	MatFile - Full path of matfile output from either 'cmpMakeStreams' or the name of a single basin mat file from 'cmpProcessRiverBasins'
 	% 	product - switch to determine which products to produce
 	%		'ksn' - ksn map as a shapefile
-	%		'ksngrid' - ascii file with ksn interpolated at all points in a grid
+	%		'ksngrid' - ascii file with ksn interpolated at all points in a grid, also produces 'ksnstdgrid', which is the standard deviation
+	%			of ksn in the specified radius
 	%		'chimap' - ascii file with chi calculated in channel networks
 	%		'chigrid' - ascii file with chi calculate at all points in a grid
 	%		'chi' - results for both chimap and chigrid
-	%		'all' - ksn, ksngrid, chimap, and chigrids
+	%		'all' - ksn, ksngrid, ksnstdgrid, chimap, and chigrids
 	%
 	% Optional Inputs:
 	%	conditioned_DEM [] - option to provide a hydrologically conditioned DEM for use in this function, expects the mat file as saved by 'cmpConditionDEM'
@@ -22,9 +23,13 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 	%	file_name_prefix ['batch'] - prefix for outputs, will append the type of output, i.e. 'ksn', 'chimap', etc
 	%	smooth_distance [1000] - distance in map units over which to smooth ksn measures when converting to shapefile
 	% 	ref_concavity [0.50] - reference concavity (as a positive value) for calculating ksn
-	%	ksn_method [quick] - switch between method to calculate ksn values, options are 'quick' and 'trib', the 'trib' method takes 3-4 times longer 
+	%	ksn_method [quick] - switch between method to calculate ksn values, options are 'quick', 'trunk', or 'trib', the 'trib' method takes 3-4 times longer 
 	%		than the 'quick' method. In most cases, the 'quick' method works well, but if values near tributary junctions are important, then 'trib'
-	%		may be better as this calculates ksn values for individual channel segments individually
+	%		may be better as this calculates ksn values for individual channel segments individually. The 'trunk' option calculates steepness values
+	%		of large streams independently (streams considered as trunks are controlled by the stream order value supplied to 'min_order'). The 'trunk' option
+	%		may be of use if you notice anomaoloulsy high channel steepness values on main trunk streams that can result because of the way values are reach
+	%		averaged.
+	%	min_order [4] - minimum stream order for a stream to be considered a trunk stream, only used if 'ksn_method' is set to 'trunk'
 	%	output_level_method [] - parameter to control how stream network base level is adjusted. Options for control of output elevation are:
 	%			'elevation' - extract streams only above a given elevation (provided by the user using the 'min_elevation' parameter) to ensure that base level
 	%				elevation for all streams is uniform. If the provided elevation is too low (i.e. some outlets of the unaltered stream network are above this
@@ -36,6 +41,7 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 	%			option should probably be left as true (i.e. chi will not be accurate if drainage area is not accurate), but this can be overly agressive
 	%			on certain DEMs and when used in tandem with 'min_elevation', it can be slow to calculate as it requires recalculation of the FLOWobj.
 	%	interp_value [0.1] - value (between 0 and 1) used for interpolation parameter in mincosthydrocon (not used if user provides a conditioned DEM)
+	%	radius [5000] - radius of circular, moving area over which to average ksn values to produced an interpolated ksn grid if product is set to 'ksngrid' or 'all'
 	%
 	% Notes:
 	%	Please be aware that the production of the chigrid can be time consuming, so be patient...
@@ -58,18 +64,20 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 	p.FunctionName = 'cmpKsnChiBatch';
 	addRequired(p,'wdir',@(x) ischar(x));
 	addRequired(p,'MatFile',@(x) ~isempty(regexp(x,regexptranslate('wildcard','*.mat'))));
-	addRequired(p,'product',@(x) ischar(validatestring(x,{'ksn','ksngrid','chimap','chigrid','all'})));
+	addRequired(p,'product',@(x) ischar(validatestring(x,{'ksn','ksngrid','chimap','chigrid','chi','all'})));
 
 	addParameter(p,'file_name_prefix','batch',@(x) ischar(x));
 	addParameter(p,'smooth_distance',1000,@(x) isscalar(x) && isnumeric(x));
 	addParameter(p,'ref_concavity',0.50,@(x) isscalar(x) && isnumeric(x));
-	addParameter(p,'ksn_method','quick',@(x) ischar(validatestring(x,{'quick','trib'})));
+	addParameter(p,'ksn_method','quick',@(x) ischar(validatestring(x,{'quick','trunk','trib'})));
+	addParameter(p,'min_order',4,@(x) isscalar(x) && isnumeric(x));
 	addParameter(p,'output_level_method',[],@(x) ischar(validatestring(x,{'elevation','max_out_elevation'})));
 	addParameter(p,'min_elevation',[],@(x) isnumeric(x));
 	addParameter(p,'conditioned_DEM',[],@(x) ~isempty(regexp(x,regexptranslate('wildcard','*.mat'))));
 	addParameter(p,'new_stream_net',[],@(x) ~isempty(regexp(x,regexptranslate('wildcard','*.mat'))));
 	addParameter(p,'interp_value',0.1,@(x) isnumeric(x) && x>=0 && x<=1);
 	addParameter(p,'complete_networks_only',true,@(x) isscalar(x) && islogical(x));
+	addParameter(p,'radius',5000,@(x) isscalar(x) && isnumeric(x));
 
 	parse(p,wdir,MatFile,product,varargin{:});
 	wdir=p.Results.wdir;
@@ -80,12 +88,14 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 	segment_length=p.Results.smooth_distance;
 	theta_ref=p.Results.ref_concavity;
 	ksn_method=p.Results.ksn_method;
+	min_order=p.Results.min_order;
 	blm=p.Results.output_level_method;
 	me=p.Results.min_elevation;
 	iv=p.Results.interp_value;
 	DEMc=p.Results.conditioned_DEM;
 	cno=p.Results.complete_networks_only;
 	nsn=p.Results.new_stream_net;
+	radius=p.Results.radius;
 
 	% Determine the type of input
 	MatFile=fullfile(wdir,MatFile);
@@ -167,6 +177,8 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 		switch ksn_method
 		case 'quick'
 			[KSN]=KSN_Quick(DEM,DEMc,A,S,theta_ref,segment_length);
+		case 'trunk'
+			[ksn_ms]=KSN_Trunk(DEM,DEMc,A,S,theta_ref,segment_length,min_order);
 		case 'trib'
 			[KSN]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length);
 		end
@@ -197,31 +209,19 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 		switch ksn_method
 		case 'quick'
 			[ksn_ms]=KSN_Quick(DEM,DEMc,A,S,theta_ref,segment_length);
+		case 'trunk'
+			[ksn_ms]=KSN_Trunk(DEM,DEMc,A,S,theta_ref,segment_length,min_order);
 		case 'trib'
 			[ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length);
 		end
 
-		[xx,yy]=getcoordinates(DEM);
-		[X,Y]=meshgrid(xx,yy);
-
-		ksn_cell=cell(numel(ksn_ms),1);
-		for ii=1:numel(ksn_ms)
-			ksn_cell{ii}=ones(numel(ksn_ms(ii).X),1)*ksn_ms(ii).ksn;
-		end
-		ksn_x=vertcat(ksn_ms.X); ksn_y=vertcat(ksn_ms.Y); ksn_ksn=vertcat(ksn_cell{:});
-
-		Fk=scatteredInterpolant(ksn_x,ksn_y,ksn_ksn);
-		ksn_int=Fk(X,Y);
-		KSNGrid=GRIDobj(xx,yy,ksn_int);
-		KSNGrid.Z(IDX.Z)=NaN;
-
-		M=GRIDobj(DEM,'logical');
-		M.Z(~isnan(DEM.Z))=true;
-		KSNGrid=crop(KSNGrid,DEM,NaN);
+		[KSNGrid,KSNstdGrid]=KsnAvg(DEM,ksn_ms,radius);
 
 		disp('Writing ARC files')
 		out_file_ksng=[file_name_prefix '_ksngrid.txt'];
+		out_file_ksnstd=[file_name_prefix '_ksnstdgrid.txt'];
 		GRIDobj2ascii(KSNGrid,out_file_ksng);
+		GRIDobj2ascii(KSNstdGrid,out_file_ksnstd);
 
 	case 'chimap'
 
@@ -294,28 +294,14 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 		switch ksn_method
 		case 'quick'
 			[ksn_ms]=KSN_Quick(DEM,DEMc,A,S,theta_ref,segment_length);
+		case 'trunk'
+			[ksn_ms]=KSN_Trunk(DEM,DEMc,A,S,theta_ref,segment_length,min_order);
 		case 'trib'
 			[ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length);
 		end
 
 		disp('Calculating interpolated ksn grid')
-		[xx,yy]=getcoordinates(DEM);
-		[X,Y]=meshgrid(xx,yy);
-
-		ksn_cell=cell(numel(ksn_ms),1);
-		for ii=1:numel(ksn_ms)
-			ksn_cell{ii}=ones(numel(ksn_ms(ii).X),1)*ksn_ms(ii).ksn;
-		end
-		ksn_x=vertcat(ksn_ms.X); ksn_y=vertcat(ksn_ms.Y); ksn_ksn=vertcat(ksn_cell{:});
-
-		Fk=scatteredInterpolant(ksn_x,ksn_y,ksn_ksn);
-		ksn_int=Fk(X,Y);
-		KSNGrid=GRIDobj(xx,yy,ksn_int);
-		KSNGrid.Z(IDX.Z)=NaN;
-
-		M=GRIDobj(DEM,'logical');
-		M.Z(~isnan(DEM.Z))=true;
-		KSNGrid=crop(KSNGrid,DEM,NaN);
+		[KSNGrid,KSNstdGrid]=KsnAvg(DEM,ksn_ms,radius);
 
 	    disp('Calculating chi map');
 		[ChiMap]=MakeChiMap(DEM,FD,A,S,theta_ref);
@@ -327,7 +313,9 @@ function cmpKsnChiBatch(wdir,MatFile,product,varargin)
 		out_file_ksn=[file_name_prefix '_ksn.shp'];
 		shapewrite(ksn_ms,out_file_ksn);
 		out_file_ksng=[file_name_prefix '_ksngrid.txt'];
+		out_file_ksnstd=[file_name_prefix '_ksnstdgrid.txt'];
 		GRIDobj2ascii(KSNGrid,out_file_ksng);
+		GRIDobj2ascii(KSNstdGrid,out_file_ksnstd);
 		out_file_cg=[file_name_prefix '_chigrid.txt'];
 		GRIDobj2ascii(ChiGrid,out_file_cg);
 		out_file_cm=[file_name_prefix '_chimap.txt'];
@@ -603,13 +591,60 @@ function [ChiOBJ]=MakeChiGrid(DEM,FD,varargin)
 end
 
 function [ksn_ms]=KSN_Quick(DEM,DEMc,A,S,theta_ref,segment_length)
-	G=gradient8(DEMc);
+	g=gradient(S,DEMc);
+	G=GRIDobj(DEM);
+	G.Z(S.IXgrid)=g;
+
 	Z_RES=DEMc-DEM;
 
 	ksn=G./(A.*(A.cellsize^2)).^(-theta_ref);
 	
+	SD=GRIDobj(DEM);
+	SD.Z(S.IXgrid)=S.distance;
+	
 	ksn_ms=STREAMobj2mapstruct(S,'seglength',segment_length,'attributes',...
-		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean});
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SD @min 'max_dist' SD @max});
+
+	seg_dist=[ksn_ms.max_dist]-[ksn_ms.min_dist];
+	distcell=num2cell(seg_dist');
+	[ksn_ms(1:end).seg_dist]=distcell{:};
+	ksn_ms=rmfield(ksn_ms,{'min_dist','max_dist'});
+end
+
+function [ksn_ms]=KSN_Trunk(DEM,DEMc,A,S,theta_ref,segment_length,min_order)
+
+	order_exp=['>=' num2str(min_order)];
+
+    Smax=modify(S,'streamorder',order_exp);
+	Smin=modify(S,'rmnodes',Smax);
+
+	g=gradient(S,DEMc);
+	G=GRIDobj(DEM);
+	G.Z(S.IXgrid)=g;
+
+	Z_RES=DEMc-DEM;
+
+	ksn=G./(A.*(A.cellsize^2)).^(-theta_ref);
+
+	SDmax=GRIDobj(DEM);
+	SDmin=GRIDobj(DEM);
+	SDmax.Z(Smax.IXgrid)=Smax.distance;
+	SDmin.Z(Smin.IXgrid)=Smin.distance;
+
+	ksn_ms_min=STREAMobj2mapstruct(Smin,'seglength',segment_length,'attributes',...
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SDmin @min 'max_dist' SDmin @max});
+
+	ksn_ms_max=STREAMobj2mapstruct(Smax,'seglength',segment_length,'attributes',...
+		{'ksn' ksn @mean 'uparea' (A.*(A.cellsize^2)) @mean 'gradient' G @mean 'cut_fill' Z_RES @mean...
+		'min_dist' SDmax @min 'max_dist' SDmax @max});
+
+	ksn_ms=vertcat(ksn_ms_min,ksn_ms_max);
+	seg_dist=[ksn_ms.max_dist]-[ksn_ms.min_dist];
+	distcell=num2cell(seg_dist');
+	[ksn_ms(1:end).seg_dist]=distcell{:};
+	ksn_ms=rmfield(ksn_ms,{'min_dist','max_dist'});
 end
 
 function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
@@ -624,8 +659,7 @@ function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
 	zu=getnal(S,DEM);
 	z_res=z-zu;
 	waitbar(2/4,w1,'Calculating chi values');
-	G=gradient8(DEMc);
-	g=getnal(S,G);
+	g=gradient(S,DEMc);
 	c=chitransform(S,A,'a0',1,'mn',theta_ref);
 	d=S.distance;
 	da=getnal(S,A.*(A.cellsize^2));
@@ -688,6 +722,7 @@ function [ksn_ms]=KSN_Trib(DEM,DEMc,FD,A,S,theta_ref,segment_length)
 						ksn_ms(seg_count).uparea=mean(da(bin_ix));
 						ksn_ms(seg_count).gradient=mean(g(bin_ix));
 						ksn_ms(seg_count).cut_fill=mean(z_res(bin_ix));
+						ksn_ms(seg_count).seg_dist=max(S.distance(bin_ix))-min(S.distance(bin_ix));
 						ksn_ms(seg_count).chi_r2=r2;
 						
 						seg_count=seg_count+1;
@@ -763,4 +798,42 @@ function [KSN,R2] = Chi_Z_Spline(c,z)
 	ssres=sum((zabsF-z_pred).^2);
 	R2=1-(ssres/sstot);
 
+end
+
+function [KSNGrid,KSNstdGrid] = KsnAvg(DEM,ksn_ms,radius)
+
+	% Calculate radius
+	radiuspx = ceil(radius/DEM.cellsize);
+	SE = strel('disk',radiuspx,0);
+
+	% Record mask of current NaNs
+	MASK=isnan(DEM.Z);
+
+	% Make grid with values along channels
+	KSNGrid=GRIDobj(DEM);
+	KSNGrid.Z(:,:)=NaN;
+	for ii=1:numel(ksn_ms)
+		ix=coord2ind(DEM,ksn_ms(ii).X,ksn_ms(ii).Y);
+		KSNGrid.Z(ix)=ksn_ms(ii).ksn;
+	end
+
+	% Local mean based on radius
+	ISNAN=isnan(KSNGrid.Z);
+    [~,L] = bwdist(~ISNAN,'e');
+    ksng = KSNGrid.Z(L);           
+    FLT   = fspecial('disk',radiuspx);
+    ksng   = imfilter(ksng,FLT,'symmetric','same','conv');
+
+    nhood   = getnhood(SE);
+    ksnstd   = stdfilt(ksng,nhood); 
+
+    % Set original NaN cells back to NaN
+    ksng(MASK)=NaN;
+    ksnstd(MASK)=NaN;
+
+    % Output
+    KSNGrid.Z=ksng;
+
+    KSNstdGrid=GRIDobj(DEM);
+    KSNstdGrid.Z=ksnstd;
 end
